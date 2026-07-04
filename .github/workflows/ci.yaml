@@ -1,0 +1,278 @@
+name: CI Pipeline
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+# Cancel superseded runs: if you push twice quickly, the older
+# in-flight run is aborted instead of wasting runner minutes.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  SCW_REGION: nl-ams
+
+jobs:
+  # ==========================================
+  # Quality gates (Go API): vet, lint, tests,
+  # vulncheck. Runs in parallel with the web
+  # job; both gate the Docker builds.
+  # ==========================================
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: "1.26"
+          cache: true
+
+      - name: Verify go.mod is tidy
+        run: |
+          go mod tidy
+          git diff --exit-code go.mod go.sum
+
+      - name: Verify sqlc generated code is up to date
+        uses: sqlc-dev/setup-sqlc@v4
+        with:
+          sqlc-version: "1.31.1"
+      - run: |
+          sqlc generate
+          git diff --exit-code db/
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: latest
+
+      - name: Test (race detector + coverage)
+        run: go test -race -coverprofile=coverage.out -covermode=atomic ./...
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v6
+        with:
+          name: coverage
+          path: coverage.out
+
+      - name: Vulnerability scan
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...
+
+  # ==========================================
+  # Quality gates (Next.js BFF): lint,
+  # typecheck, production build. npm ci needs
+  # web/package-lock.json committed — the
+  # guard step turns a cryptic npm error into
+  # an actionable one.
+  # ==========================================
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Require package-lock.json
+        run: |
+          if [ ! -f package-lock.json ]; then
+            echo "::error file=web/package-lock.json::web/package-lock.json is missing." \
+                 " Run 'npm install' inside web/ and commit the lockfile" \
+                 " (see web/README.md) so builds are reproducible."
+            exit 1
+          fi
+
+      - name: Set up Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build (production)
+        run: npm run build
+
+  # ==========================================
+  # Docker images: build always, push only on
+  # merge to main (never on PRs / forks).
+  # One matrix leg per deployable:
+  #   api — Go binary, multi-arch (cheap to
+  #         cross-compile, static CGO=0)
+  #   web — Next.js standalone, amd64 only
+  #         (npm/next under QEMU is painfully
+  #         slow, and Scaleway runs amd64)
+  # Tagged with the commit SHA (traceable, and
+  # a changed tag is what triggers a rollout).
+  # ==========================================
+  docker:
+    needs: [quality, web]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: api
+            context: .
+            dockerfile: ./Dockerfile
+            image: order-api
+            platforms: linux/amd64,linux/arm64
+          - name: web
+            context: ./web
+            dockerfile: ./web/Dockerfile
+            image: order-api-web
+            platforms: linux/amd64
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to Scaleway Container Registry
+        if: github.event_name == 'push'
+        uses: docker/login-action@v3
+        with:
+          registry: rg.${{ env.SCW_REGION }}.scw.cloud
+          username: nologin
+          password: ${{ secrets.SCW_SECRET_KEY }}
+
+      - name: Build (and push on main) ${{ matrix.name }} image
+        uses: docker/build-push-action@v7
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          # PRs: build-only smoke test. Pushes to main: publish.
+          push: ${{ github.event_name == 'push' }}
+          platforms: ${{ matrix.platforms }}
+          tags: |
+            rg.${{ env.SCW_REGION }}.scw.cloud/${{ vars.SCW_REGISTRY_NAMESPACE }}/${{ matrix.image }}:${{ github.sha }}
+            rg.${{ env.SCW_REGION }}.scw.cloud/${{ vars.SCW_REGISTRY_NAMESPACE }}/${{ matrix.image }}:latest
+          # Separate cache scopes so the two legs don't evict each other.
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+
+  # ==========================================
+  # Infra sanity on PRs: no credentials, no
+  # state — just fmt + validate so broken HCL
+  # never reaches main.
+  # ==========================================
+  infra-check:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      # Advisory only: whitespace shouldn't block a deploy. Validate
+      # below is the hard gate.
+      - name: Format check (advisory)
+        run: |
+          terraform fmt -check -recursive \
+            || echo "::warning::infra/ is not terraform-fmt clean — run 'terraform fmt -recursive infra/' and commit"
+
+      - name: Validate
+        run: |
+          terraform init -backend=false
+          terraform validate
+
+  # ==========================================
+  # Deploy: terraform apply owns everything —
+  # both Serverless Containers (existence,
+  # sizing, env, secrets, image tag), the
+  # Scaleway custom domains, the Cloudflare
+  # CNAME records for boozoo.top, and the
+  # Zitadel project, applications, login
+  # policy, and branding.
+  # The image tag is the commit SHA pushed by
+  # the docker job; changing it is the rollout.
+  #
+  # One-time setup:
+  #   - Object Storage bucket order-api-tfstate (nl-ams, private)
+  #   - Cloudflare API token scoped to Zone.DNS:Edit on boozoo.top
+  # Repo secrets: SCW_ACCESS_KEY, SCW_SECRET_KEY, SCW_PROJECT_ID,
+  #   CLOUDFLARE_API_TOKEN, DATABASE_URL, AUTH_SECRET, ZITADEL_PAT,
+  #   NEW_RELIC_LICENSE_KEY
+  # Repo variables: SCW_REGISTRY_NAMESPACE, CLOUDFLARE_ZONE_ID,
+  #   ZITADEL_ORG_ID
+  # Zitadel project/apps/policies are Terraform-managed too, so client
+  # IDs and the web client secret never pass through GitHub at all.
+  #
+  # Scaleway Object Storage has no state locking, so applies are
+  # serialized here: dedicated concurrency group, never cancelled
+  # mid-apply.
+  # ==========================================
+  deploy:
+    needs: docker
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: production
+    concurrency:
+      group: terraform-apply
+      cancel-in-progress: false
+    defaults:
+      run:
+        working-directory: infra
+    env:
+      # scaleway provider
+      SCW_ACCESS_KEY: ${{ secrets.SCW_ACCESS_KEY }}
+      SCW_SECRET_KEY: ${{ secrets.SCW_SECRET_KEY }}
+      SCW_DEFAULT_PROJECT_ID: ${{ secrets.SCW_PROJECT_ID }}
+      SCW_DEFAULT_REGION: nl-ams
+      # cloudflare provider
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      # s3-compatible state backend (same Scaleway keys)
+      AWS_ACCESS_KEY_ID: ${{ secrets.SCW_ACCESS_KEY }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.SCW_SECRET_KEY }}
+      # stack inputs
+      TF_VAR_image_tag: ${{ github.sha }}
+      TF_VAR_registry_namespace: ${{ vars.SCW_REGISTRY_NAMESPACE }}
+      TF_VAR_cloudflare_zone_id: ${{ vars.CLOUDFLARE_ZONE_ID }}
+      TF_VAR_zitadel_org_id: ${{ vars.ZITADEL_ORG_ID }}
+      TF_VAR_zitadel_pat: ${{ secrets.ZITADEL_PAT }}
+      TF_VAR_database_url: ${{ secrets.DATABASE_URL }}
+      TF_VAR_auth_secret: ${{ secrets.AUTH_SECRET }}
+      TF_VAR_new_relic_license_key: ${{ secrets.NEW_RELIC_LICENSE_KEY }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Init
+        run: terraform init -input=false
+
+      - name: Plan
+        run: terraform plan -input=false -out=tfplan
+
+      - name: Apply
+        run: terraform apply -input=false -auto-approve tfplan

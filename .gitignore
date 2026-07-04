@@ -1,0 +1,34 @@
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary, built by `go test`
+*.test
+
+# Output of the go coverage tool
+*.out
+
+# IDE specific files
+.idea/
+.vscode/
+
+# Coverage output from local `go test -coverprofile`
+coverage.out
+
+# Local environment files — never commit secrets
+.env
+.env.*
+!.env.example
+
+# Credentials (Scaleway service-account keys, etc.)
+key.json
+
+# Node / Next.js (web/ also has its own .gitignore)
+node_modules/
+web/.next/
+
+# Filled-in bootstrap env — secrets, never commit
+scripts/bootstrap.env

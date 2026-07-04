@@ -1,0 +1,38 @@
+name: SQL Review
+on:
+  pull_request:
+    branches: ["main"]
+    paths: ["bytebase/.orders_db/*.sql"]
+jobs:
+  sql-review:
+    permissions:
+      id-token: write
+      pull-requests: write
+    runs-on: ubuntu-latest
+    container:
+      image: bytebase/bytebase-action
+    env:
+      BYTEBASE_URL: https://bytebasec189f03b-bytebase.functions.fnc.nl-ams.scw.cloud
+      BYTEBASE_WORKLOAD_IDENTITY: db-workflow@testproj-dxlm.workload.bytebase.com
+    steps:
+      - uses: actions/checkout@v4
+      - name: Exchange token
+        id: bytebase-auth
+        run: |
+          OIDC_TOKEN=$(curl -s -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=bytebase" | jq -r '.value')
+          ACCESS_TOKEN=$(curl -s -X POST "$BYTEBASE_URL/v1/auth:exchangeToken" \
+            -H "Content-Type: application/json" \
+            -d "{\"token\":\"$OIDC_TOKEN\",\"email\":\"$BYTEBASE_WORKLOAD_IDENTITY\"}" \
+            | jq -r '.accessToken')
+          echo "access-token=$ACCESS_TOKEN" >> $GITHUB_OUTPUT
+      - name: SQL Review
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          bytebase-action check \
+            --url=$BYTEBASE_URL \
+            --access-token=${{ steps.bytebase-auth.outputs.access-token }} \
+            --project=projects/testproj-dxlm \
+            --targets=instances/neondb-dev-hpli/databases/orderdb \
+            --file-pattern=migrations/*.sql

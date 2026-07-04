@@ -1,0 +1,54 @@
+# Local observability stack for order-api.
+#
+#   docker compose -f compose.otel.yaml up --build
+#
+#   API:      http://localhost:8080/orders
+#   Grafana:  http://localhost:3000  (anonymous admin enabled in this image)
+#             -> Explore: Tempo for traces, Prometheus for metrics
+#
+# grafana/otel-lgtm bundles an OTel Collector + Loki + Grafana + Tempo +
+# Prometheus (Mimir) in ONE container — perfect for local dev, not for prod.
+#
+# The Postgres credentials below are throwaway values for a local, ephemeral
+# container only. Real environments use DATABASE_URL from the environment.
+
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: order
+      POSTGRES_PASSWORD: localdev
+      POSTGRES_DB: orderdb
+    ports:
+      - "5432:5432"
+    volumes:
+      # Migrations double as initdb scripts (run once, alphabetically —
+      # which matches the timestamp-prefixed naming). POC convenience only;
+      # real schema changes still go through the Bytebase pipeline.
+      - ./migrations:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U order -d orderdb"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+
+  lgtm:
+    image: grafana/otel-lgtm:latest
+    ports:
+      - "3000:3000"   # Grafana UI
+      - "4317:4317"   # OTLP gRPC (unused by the app, handy for other tools)
+      - "4318:4318"   # OTLP HTTP (what the app exports to)
+
+  api:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      DATABASE_URL: postgres://order:localdev@db:5432/orderdb?sslmode=disable
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://lgtm:4318
+      OTEL_SERVICE_NAME: order-api
+    depends_on:
+      db:
+        condition: service_healthy
+      lgtm:
+        condition: service_started

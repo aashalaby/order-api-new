@@ -1,0 +1,3 @@
+ALTER TABLE orders
+    ADD COLUMN test1 TEXT,
+    ADD COLUMN test2 INT;

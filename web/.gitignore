@@ -1,0 +1,10 @@
+/node_modules
+/.next/
+/out/
+*.tsbuildinfo
+next-env.d.ts.timestamp*
+
+# env files hold AUTH_SECRET and the Zitadel client secret — never commit
+.env
+.env.*
+!.env.example

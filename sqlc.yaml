@@ -1,0 +1,16 @@
+version: "2"
+sql:
+  - engine: "postgresql" # Must be explicitly "postgresql", NOT "postgres"
+    schema: "migrations/" # Path to your table definitions file
+    queries: "db/queries.sql" # Path to your queries file
+    gen:
+      go:
+        emit_interface: true
+        # Lowercase snake_case JSON on responses (HANDOFF goal 3: contract
+        # cleanup while the only consumer is being rebuilt). Removes the
+        # PascalCase-response / lowercase-request asymmetry the console
+        # used to paper over.
+        emit_json_tags: true
+        package: "db" # Name of the Go package to generate
+        out: "db" # Output directory for generated Go files
+        sql_package: "pgx/v5" # Tells sqlc to generate native pgx/v5 code

@@ -1,0 +1,77 @@
+name: Benchmarks
+
+# On-demand only (workflow_dispatch), deliberately NOT part of the blocking
+# quality gate: shared GitHub runners have noisy neighbors, so absolute
+# numbers vary run-to-run and would make a pass/fail gate flaky. Instead,
+# run this manually on a branch and read the benchstat delta vs main —
+# benchstat's variance stats (±%) tell you whether a difference is real.
+
+on:
+  workflow_dispatch:
+    inputs:
+      count:
+        description: "Repetitions per benchmark (higher = better benchstat confidence)"
+        required: false
+        default: "10"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bench-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  bench:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # need main's history for the baseline run
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: "1.26"
+          cache: true
+
+      # Benchmarks use the stubQueries fake — no DB, no race detector,
+      # so no build-base/cgo needed. -run=^$ skips regular tests.
+      - name: Run benchmarks on this ref
+        run: |
+          go test -bench=. -benchmem -count=${{ inputs.count }} -run='^$' \
+            ./handlers/ | tee head.txt
+
+      - name: Run baseline benchmarks on main
+        run: |
+          git stash --include-untracked || true
+          git checkout origin/main
+          if compgen -G "handlers/*_bench_test.go" > /dev/null; then
+            go test -bench=. -benchmem -count=${{ inputs.count }} -run='^$' \
+              ./handlers/ | tee base.txt
+          else
+            echo "No benchmarks on main yet; skipping baseline." | tee base.txt
+          fi
+          git checkout -
+          git stash pop || true
+
+      - name: Compare with benchstat
+        run: |
+          go run golang.org/x/perf/cmd/benchstat@latest base.txt head.txt \
+            | tee benchstat.txt || true
+          {
+            echo '## Benchmark comparison (base = main, head = ${{ github.ref_name }})'
+            echo '```'
+            cat benchstat.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload raw results
+        uses: actions/upload-artifact@v6
+        with:
+          name: benchmark-results-${{ github.run_id }}
+          path: |
+            head.txt
+            base.txt
+            benchstat.txt

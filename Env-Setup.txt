@@ -1,0 +1,54 @@
+docker run --name go-dev-con -v .:/work -it cgr.dev/chainguard/wolfi-base
+
+apk add --no-cache git go sqlc dind
+
+bash
+
+git init
+
+git config --global user.email as@gmail.com
+git config --global user.name "AS"
+
+go mod init order-api
+
+git add .
+git commit -m "Initial commit: Initialize Go module and gitignore"
+
+
+git branch -v
+git branch -m master main
+
+git remote add origin https://github.com/aashalaby/order-api.git
+
+git push -u origin main
+aashalaby
+<REDACTED — this GitHub PAT was committed to a public repo; revoke it and use a fresh one from a credential manager>
+
+
+docker exec -it go-dev-con bash
+
+go get github.com/jackc/pgx/v5
+go get github.com/jackc/pgx/v5/pgxpool
+
+
+#go get github.com/sqlc-dev/sqlc/cmd/sqlc
+#go install github.com/sqlc-dev/sqlc/cmd/sqlc
+
+
+go get -tool github.com/sqlc-dev/sqlc/cmd/sqlc
+
+/root/go/bin/sqlc version
+bash: sqlc: command not found
+
+
+/root/go/bin/sqlc generate
+
+~/go/bin or $GOPATH/bin directory is added to your system's PATH env variable
+
+go install golang.org/x/vuln/cmd/govulncheck@latest
+/root/go/bin/govulncheck ./...
+
+======
+
+https://bytebasec189f03b-bytebase.functions.fnc.nl-ams.scw.cloud
+<REDACTED Bytebase login — this password was committed to a public repo; rotate it>

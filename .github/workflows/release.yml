@@ -1,0 +1,110 @@
+name: Rollout
+on:
+  push:
+    branches: ["main"]
+    paths: ["migrations/*.sql"]
+env:
+  BYTEBASE_URL: https://bytebasec189f03b-bytebase.functions.fnc.nl-ams.scw.cloud
+  BYTEBASE_WORKLOAD_IDENTITY: db-workflow@testproj-dxlm.workload.bytebase.com
+  BYTEBASE_PROJECT: projects/testproj-dxlm
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build
+        run: echo "Building..."
+  create-rollout:
+    needs: build
+    permissions:
+      id-token: write
+      contents: read
+    runs-on: ubuntu-latest
+    container:
+      image: bytebase/bytebase-action:3.19.1
+    outputs:
+      bytebase-plan: ${{ steps.set-output.outputs.plan }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Exchange token
+        id: bytebase-auth
+        run: |
+          OIDC_TOKEN=$(curl -s -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=bytebase" | jq -r '.value')
+          ACCESS_TOKEN=$(curl -s -X POST "$BYTEBASE_URL/v1/auth:exchangeToken" \
+            -H "Content-Type: application/json" \
+            -d "{\"token\":\"$OIDC_TOKEN\",\"email\":\"$BYTEBASE_WORKLOAD_IDENTITY\"}" \
+            | jq -r '.accessToken')
+          echo "access-token=$ACCESS_TOKEN" >> $GITHUB_OUTPUT
+      - name: Create rollout
+        run: |
+          bytebase-action rollout \
+            --url=$BYTEBASE_URL \
+            --access-token=${{ steps.bytebase-auth.outputs.access-token }} \
+            --project=$BYTEBASE_PROJECT \
+            --targets=instances/neondb-dev-hpli/databases/orderdb \
+            --file-pattern=migrations/*.sql \
+            --output=${{ runner.temp }}/bytebase-metadata.json
+      - name: Set output
+        id: set-output
+        run: |
+          PLAN=$(jq -r .plan ${{ runner.temp }}/bytebase-metadata.json)
+          echo "plan=$PLAN" >> $GITHUB_OUTPUT
+  deploy-to-test:
+    needs: create-rollout
+    permissions:
+      id-token: write
+      contents: read
+    runs-on: ubuntu-latest
+    environment: test
+    container:
+      image: bytebase/bytebase-action:3.19.1
+    steps:
+      - uses: actions/checkout@v7
+      - name: Exchange token
+        id: bytebase-auth
+        run: |
+          OIDC_TOKEN=$(curl -s -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=bytebase" | jq -r '.value')
+          ACCESS_TOKEN=$(curl -s -X POST "$BYTEBASE_URL/v1/auth:exchangeToken" \
+            -H "Content-Type: application/json" \
+            -d "{\"token\":\"$OIDC_TOKEN\",\"email\":\"$BYTEBASE_WORKLOAD_IDENTITY\"}" \
+            | jq -r '.accessToken')
+          echo "access-token=$ACCESS_TOKEN" >> $GITHUB_OUTPUT
+      - name: Deploy to test
+        run: |
+          bytebase-action rollout \
+            --url=$BYTEBASE_URL \
+            --access-token=${{ steps.bytebase-auth.outputs.access-token }} \
+            --project=$BYTEBASE_PROJECT \
+            --target-stage=environments/test \
+            --plan=${{ needs.create-rollout.outputs.bytebase-plan }}
+  deploy-to-prod:
+    needs: [deploy-to-test, create-rollout]
+    permissions:
+      id-token: write
+      contents: read
+    runs-on: ubuntu-latest
+    environment: prod
+    container:
+      image: bytebase/bytebase-action:3.19.1
+    steps:
+      - uses: actions/checkout@v7
+      - name: Exchange token
+        id: bytebase-auth
+        run: |
+          OIDC_TOKEN=$(curl -s -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=bytebase" | jq -r '.value')
+          ACCESS_TOKEN=$(curl -s -X POST "$BYTEBASE_URL/v1/auth:exchangeToken" \
+            -H "Content-Type: application/json" \
+            -d "{\"token\":\"$OIDC_TOKEN\",\"email\":\"$BYTEBASE_WORKLOAD_IDENTITY\"}" \
+            | jq -r '.accessToken')
+          echo "access-token=$ACCESS_TOKEN" >> $GITHUB_OUTPUT
+      - name: Deploy to prod
+        run: |
+          bytebase-action rollout \
+            --url=$BYTEBASE_URL \
+            --access-token=${{ steps.bytebase-auth.outputs.access-token }} \
+            --project=$BYTEBASE_PROJECT \
+            --target-stage=environments/prod \
+            --plan=${{ needs.create-rollout.outputs.bytebase-plan }}

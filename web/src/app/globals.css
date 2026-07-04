@@ -1,0 +1,57 @@
+@import "tailwindcss";
+
+/*
+ * Design tokens — "ledger paper" identity:
+ * warm paper ground, ink-navy text, one deep teal for actions (a nod to
+ * the Go console's accent without copying it), ledger green reserved for
+ * money, and IBM Plex Mono carrying all data the way a receipt would.
+ */
+@theme inline {
+  --color-paper: #f4f2ec;
+  --color-card: #fffefb;
+  --color-ink: #182430;
+  --color-muted: #62707b;
+  --color-line: #dcdcd2;
+  --color-teal: #0b6e7f;
+  --color-teal-deep: #08525f;
+  --color-money: #1f7a4d;
+  --color-danger: #b3261e;
+
+  --font-display: var(--font-bricolage);
+  --font-mono: var(--font-plex-mono);
+}
+
+body {
+  background: var(--color-paper);
+  color: var(--color-ink);
+}
+
+/* Dotted leader between an item name and its numbers — the receipt line
+   that is this UI's signature element. */
+.leader {
+  flex: 1 1 auto;
+  min-width: 2rem;
+  margin: 0 0.6rem;
+  border-bottom: 2px dotted var(--color-line);
+  transform: translateY(-0.3em);
+}
+
+/* Perforated receipt edge on the ledger card. */
+.perforated {
+  background-image: radial-gradient(circle, var(--color-paper) 3px, transparent 3.5px);
+  background-size: 16px 8px;
+  background-repeat: repeat-x;
+  background-position: bottom;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .row-in {
+    animation: rowIn 0.18s ease-out;
+  }
+  @keyframes rowIn {
+    from {
+      opacity: 0;
+      transform: translateY(-3px);
+    }
+  }
+}

@@ -1,0 +1,301 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>order-api console</title>
+<style>
+  :root {
+    --bg: #F2F4F6;
+    --panel: #FFFFFF;
+    --ink: #16212B;
+    --muted: #5C6B7A;
+    --line: #D8DEE4;
+    --accent: #007D9C;
+    --accent-ink: #FFFFFF;
+    --ok: #1F7A4D;
+    --warn: #A66B00;
+    --err: #B3261E;
+    --mono: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: var(--sans); font-size: 14px; line-height: 1.45;
+  }
+  .topbar {
+    display: flex; flex-wrap: wrap; gap: 12px; align-items: center;
+    padding: 14px 20px; background: var(--panel); border-bottom: 1px solid var(--line);
+  }
+  .wordmark { font-family: var(--mono); font-size: 15px; font-weight: 600; letter-spacing: .02em; }
+  .wordmark .path { color: var(--accent); }
+  .authbox { display: flex; gap: 8px; align-items: center; margin-left: auto; flex-wrap: wrap; }
+  .authbox label { font-family: var(--mono); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  .authbox input {
+    font-family: var(--mono); font-size: 12px; width: min(340px, 60vw);
+    padding: 7px 9px; border: 1px solid var(--line); border-radius: 4px; background: var(--bg);
+  }
+  .authstate { font-family: var(--mono); font-size: 11px; padding: 3px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+  .authstate.on { color: var(--ok); border-color: var(--ok); }
+
+  main {
+    display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+    gap: 16px; padding: 16px 20px; max-width: 1200px; margin: 0 auto;
+  }
+  @media (max-width: 860px) { main { grid-template-columns: 1fr; } }
+
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; }
+  .sechead {
+    display: flex; align-items: center; gap: 10px; padding: 10px 14px;
+    border-bottom: 1px solid var(--line);
+  }
+  .sechead h2 {
+    margin: 0; font-family: var(--mono); font-size: 11px; font-weight: 600;
+    letter-spacing: .1em; text-transform: uppercase; color: var(--muted);
+  }
+  .sechead .spacer { margin-left: auto; }
+
+  button {
+    font-family: var(--mono); font-size: 12px; padding: 6px 12px;
+    border: 1px solid var(--line); border-radius: 4px; background: var(--panel);
+    color: var(--ink); cursor: pointer;
+  }
+  button:hover { border-color: var(--accent); color: var(--accent); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+  button.primary:hover { filter: brightness(1.08); color: var(--accent-ink); }
+  button.danger:hover { border-color: var(--err); color: var(--err); }
+  button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+  table { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 13px; }
+  th, td { text-align: left; padding: 8px 14px; border-bottom: 1px solid var(--line); }
+  th { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+  td.num, th.num { text-align: right; }
+  tr:last-child td { border-bottom: none; }
+  td .rowactions { display: flex; gap: 6px; justify-content: flex-end; }
+  .empty { padding: 22px 14px; color: var(--muted); font-family: var(--mono); font-size: 13px; }
+
+  form { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; padding: 14px; }
+  @media (max-width: 560px) { form { grid-template-columns: 1fr 1fr; } }
+  form .field { display: flex; flex-direction: column; gap: 4px; }
+  form label { font-family: var(--mono); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  form input {
+    font-family: var(--mono); font-size: 13px; padding: 7px 9px;
+    border: 1px solid var(--line); border-radius: 4px; background: var(--bg);
+  }
+  form input:disabled { opacity: .55; }
+  .formfoot { grid-column: 1 / -1; display: flex; gap: 8px; align-items: center; }
+  .formfoot .hint { font-family: var(--mono); font-size: 11px; color: var(--muted); margin-left: auto; }
+
+  /* Signature: the wire log */
+  #log { list-style: none; margin: 0; padding: 6px 0; font-family: var(--mono); font-size: 12px; max-height: 480px; overflow-y: auto; }
+  #log li { display: flex; gap: 10px; align-items: baseline; padding: 5px 14px; border-bottom: 1px dashed var(--line); }
+  #log li:last-child { border-bottom: none; }
+  #log .t { color: var(--muted); }
+  #log .m { width: 5ch; font-weight: 600; }
+  #log .p { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #log .s { font-weight: 600; }
+  #log .ms { color: var(--muted); width: 7ch; text-align: right; }
+  .s2 { color: var(--ok); } .s4 { color: var(--warn); } .s5, .s0 { color: var(--err); }
+  #log li.new { animation: slidein .18s ease-out; }
+  @keyframes slidein { from { opacity: 0; transform: translateY(-3px); } }
+  @media (prefers-reduced-motion: reduce) { #log li.new { animation: none; } }
+
+  #detail { font-family: var(--mono); font-size: 12px; margin: 0; padding: 12px 14px; white-space: pre-wrap; word-break: break-word; color: var(--ink); background: var(--bg); border-top: 1px solid var(--line); max-height: 200px; overflow-y: auto; }
+  #detail:empty { display: none; }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <span class="wordmark">order-api<span class="path"> /console</span></span>
+  <div class="authbox">
+    <label for="token">bearer token</label>
+    <input id="token" type="password" placeholder="paste to authenticate" autocomplete="off" spellcheck="false">
+    <span id="authstate" class="authstate">anonymous</span>
+  </div>
+</div>
+
+<main>
+  <div>
+    <section>
+      <div class="sechead">
+        <h2>Orders</h2>
+        <span class="spacer"></span>
+        <button id="refresh">Refresh</button>
+      </div>
+      <div id="tablewrap"><div class="empty">No data yet — Refresh to load orders.</div></div>
+    </section>
+
+    <section style="margin-top:16px">
+      <div class="sechead"><h2 id="formtitle">Create order</h2></div>
+      <form id="orderform">
+        <div class="field"><label for="f-item">item</label><input id="f-item" required placeholder="Mechanical Keyboard"></div>
+        <div class="field"><label for="f-qty">quantity</label><input id="f-qty" type="number" min="1" step="1" value="1" required></div>
+        <div class="field"><label for="f-price">price</label><input id="f-price" type="number" min="0" step="0.01" value="0.00" required></div>
+        <div class="formfoot">
+          <button type="submit" class="primary" id="submitbtn">Create order</button>
+          <button type="button" id="cancelbtn" hidden>Cancel edit</button>
+          <span class="hint">POST /orders · id is server-generated · lowercase JSON both ways</span>
+        </div>
+      </form>
+    </section>
+  </div>
+
+  <section>
+    <div class="sechead">
+      <h2>Wire log</h2>
+      <span class="spacer"></span>
+      <button id="clearlog">Clear</button>
+    </div>
+    <ul id="log"></ul>
+    <pre id="detail"></pre>
+  </section>
+</main>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const state = { editing: null };
+
+// --- auth token: session-scoped, never persisted to disk ---------------
+const tokenInput = $("token");
+tokenInput.value = sessionStorage.getItem("order-api-token") || "";
+function syncAuthState() {
+  const on = tokenInput.value.trim() !== "";
+  sessionStorage.setItem("order-api-token", tokenInput.value.trim());
+  const el = $("authstate");
+  el.textContent = on ? "bearer set" : "anonymous";
+  el.classList.toggle("on", on);
+}
+tokenInput.addEventListener("input", syncAuthState);
+syncAuthState();
+
+// --- api client: every call feeds the wire log --------------------------
+async function api(method, path, body) {
+  const started = performance.now();
+  const headers = {};
+  if (body !== undefined) headers["Content-Type"] = "application/json";
+  const token = tokenInput.value.trim();
+  if (token) headers["Authorization"] = "Bearer " + token;
+
+  let status = 0, payload = null;
+  try {
+    const res = await fetch(path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+    status = res.status;
+    const text = await res.text();
+    try { payload = text ? JSON.parse(text) : null; } catch { payload = text; }
+  } catch (err) {
+    payload = { error: "network: " + err.message };
+  }
+  logEntry(method, path, status, performance.now() - started, payload);
+  return { status, payload };
+}
+
+// --- signature element: the wire log ------------------------------------
+function logEntry(method, path, status, ms, payload) {
+  const li = document.createElement("li");
+  li.className = "new";
+  const cls = "s" + Math.floor(status / 100);
+  li.innerHTML =
+    `<span class="t">${new Date().toLocaleTimeString([], {hour12:false})}</span>` +
+    `<span class="m">${method}</span>` +
+    `<span class="p">${path}</span>` +
+    `<span class="s ${cls}">${status || "ERR"}</span>` +
+    `<span class="ms">${ms.toFixed(0)} ms</span>`;
+  li.addEventListener("click", () => {
+    $("detail").textContent = JSON.stringify(payload, null, 2) ?? "";
+  });
+  li.title = "Show response body";
+  li.style.cursor = "pointer";
+  const log = $("log");
+  log.prepend(li);
+  while (log.children.length > 50) log.removeChild(log.lastChild);
+}
+$("clearlog").addEventListener("click", () => { $("log").innerHTML = ""; $("detail").textContent = ""; });
+
+// --- orders table --------------------------------------------------------
+// Responses use lowercase snake_case JSON (sqlc emit_json_tags): id, item,
+// quantity, price, user_id — the same shape request bodies use.
+function renderOrders(orders) {
+  const wrap = $("tablewrap");
+  if (!Array.isArray(orders) || orders.length === 0) {
+    wrap.innerHTML = `<div class="empty">No orders. Create one below.</div>`;
+    return;
+  }
+  const rows = orders.map(o => `
+    <tr>
+      <td>${esc(o.id)}</td>
+      <td>${esc(o.item)}</td>
+      <td class="num">${esc(o.quantity)}</td>
+      <td class="num">${Number(o.price).toFixed(2)}</td>
+      <td><div class="rowactions">
+        <button data-edit="${esc(o.id)}">Edit</button>
+        <button data-del="${esc(o.id)}" class="danger">Delete</button>
+      </div></td>
+    </tr>`).join("");
+  wrap.innerHTML = `<table>
+    <thead><tr><th>ID</th><th>Item</th><th class="num">Qty</th><th class="num">Price</th><th></th></tr></thead>
+    <tbody>${rows}</tbody></table>`;
+
+  wrap.querySelectorAll("[data-edit]").forEach(b => b.addEventListener("click", () => {
+    const o = orders.find(x => x.id === b.dataset.edit);
+    startEdit(o);
+  }));
+  wrap.querySelectorAll("[data-del]").forEach(b => b.addEventListener("click", async () => {
+    await api("DELETE", "/orders/" + encodeURIComponent(b.dataset.del));
+    refresh();
+  }));
+}
+function esc(v) {
+  return String(v).replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
+}
+
+async function refresh() {
+  const { status, payload } = await api("GET", "/orders");
+  if (status === 200) renderOrders(payload);
+}
+$("refresh").addEventListener("click", refresh);
+
+// --- create / edit form ---------------------------------------------------
+function startEdit(o) {
+  state.editing = o.id;
+  $("f-item").value = o.item;
+  $("f-qty").value = o.quantity;
+  $("f-price").value = Number(o.price).toFixed(2);
+  $("formtitle").textContent = "Update order " + o.id;
+  $("submitbtn").textContent = "Save changes";
+  $("cancelbtn").hidden = false;
+  $("f-item").focus();
+}
+function endEdit() {
+  state.editing = null;
+  $("orderform").reset();
+  $("f-qty").value = 1; $("f-price").value = "0.00";
+  $("formtitle").textContent = "Create order";
+  $("submitbtn").textContent = "Create order";
+  $("cancelbtn").hidden = true;
+}
+$("cancelbtn").addEventListener("click", endEdit);
+
+$("orderform").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  // Lowercase keys both ways now; POST never sends an id (server-generated).
+  const body = {
+    item: $("f-item").value.trim(),
+    quantity: parseInt($("f-qty").value, 10),
+    price: parseFloat($("f-price").value),
+  };
+  let res;
+  if (state.editing) {
+    res = await api("PUT", "/orders/" + encodeURIComponent(state.editing), body);
+  } else {
+    res = await api("POST", "/orders", body);
+  }
+  if (res.status === 200 || res.status === 201) { endEdit(); refresh(); }
+});
+
+refresh();
+</script>
+</body>
+</html>
