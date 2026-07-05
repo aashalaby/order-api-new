@@ -299,3 +299,62 @@ if present). New inputs: `ZITADEL_ORG_ID` variable + `ZITADEL_PAT`
 secret (machine user `terraform`, Org Owner — see infra/README.md
 bootstrap steps, which also cover deleting or importing the
 console-created project).
+
+---
+
+# Session handoff — 2026-07-05
+
+## Current state
+
+Everything through identity, infra, and observability is code-managed and
+CI-deployed:
+
+- **Backend** (Go 1.26): per-user orders via `auth.UserID(ctx)`
+  (panic-safe wrapper; "anonymous" fallback when auth is off),
+  server-generated `ord_…` IDs, DELETE→404 via `:execrows`, lowercase
+  JSON, public `/healthz`, OTel traces + pgxpool metrics + activity-gated
+  `db.client.rtt` probe (never keeps Neon awake when idle).
+- **Web** (`web/`, Next 16.2 + Auth.js beta.31): BFF pattern, token only
+  in encrypted cookie, `/api/orders*` proxy, Zitadel-hosted
+  login/registration, lint clean (one documented upstream-bug
+  suppression: facebook/react#34905).
+- **Infra** (`infra/`): Terraform owns Scaleway containers
+  (`orders.boozoo.top` / `api.boozoo.top`), Cloudflare DNS-only CNAMEs,
+  and ALL of Zitadel (project, API+Web apps, login policy with
+  self-registration, branding with watermark off). Client IDs/secret flow
+  resource→container env. State: `order-api-tfstate` bucket (nl-ams).
+- **CI**: quality (Go) + web (npm) + infra-check (PR) → docker matrix →
+  terraform apply with `image_tag = SHA`. Actions: checkout v7,
+  docker/login v4, setup-terraform v4.
+- **Bootstrap**: `scripts/bootstrap-github.sh` sets all 8 secrets / 3
+  variables; obsolete entries auto-deleted.
+
+Verified working by the user: local dev end-to-end (Zitadel login,
+manual email verification, CRUD), lint/typecheck/build, go test.
+First full production apply pending at handoff time.
+
+## Next session: payments via polar.sh
+
+Intended work: add payment support through polar.sh. Relevant
+integration points in the current architecture:
+
+- **Where checkout starts**: `web/src/components/OrdersLedger.tsx`
+  (client) → BFF route handlers under `web/src/app/api/` — a checkout
+  session creation belongs in a new server-side route (Polar access token
+  must stay server-side, same custody rule as the Zitadel token).
+- **Webhooks**: Polar → a new public Go endpoint (register outside the
+  auth wrapper in `main.go`, like `/healthz`; verify Polar's webhook
+  signature) or a Next route handler. Order state transitions
+  (paid/refunded) mean new columns → **append-only migration** via
+  Bytebase + `sqlc generate` (CI enforces drift).
+- **Secrets**: Polar access token + webhook secret should enter through
+  `infra/variables.tf` → container `secret_environment_variables`, and
+  `scripts/bootstrap.env.example` + `bootstrap-github.sh` extended —
+  same pattern as `ZITADEL_PAT`.
+- **User identity ↔ Polar customer**: orders carry `user_id` (Zitadel
+  sub); Polar has an external-customer-ID concept that should map to it.
+
+Constraints that still apply: no CORS by design (everything same-origin
+through the BFF), optional-by-default modularity (payments should no-op
+without config, like auth/telemetry), no secrets in the repo, CI is the
+verifier.

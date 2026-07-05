@@ -3,7 +3,7 @@
 # Terraform owns the containers end to end: existence, sizing, runtime
 # env, secrets, and which image tag runs. CI's docker job pushes
 # :<sha> images; the deploy job then applies this stack with
-# -var image_tag=<sha>, and the registry_image change triggers the
+# -var image_tag=<sha>, and the image change triggers the
 # rollout (deploy = true). This replaces the previous curl-PATCH deploy.
 
 locals {
@@ -31,7 +31,7 @@ resource "scaleway_container" "api" {
   name         = "order-api"
   namespace_id = scaleway_container_namespace.main.id
 
-  registry_image = "${local.registry}/order-api:${var.image_tag}"
+  image          = "${local.registry}/order-api:${var.image_tag}"
   port           = 8080
   protocol       = "http1"
   privacy        = "public"
@@ -58,7 +58,7 @@ resource "scaleway_container" "web" {
   name         = "order-api-web"
   namespace_id = scaleway_container_namespace.main.id
 
-  registry_image = "${local.registry}/order-api-web:${var.image_tag}"
+  image          = "${local.registry}/order-api-web:${var.image_tag}"
   port           = 3000
   protocol       = "http1"
   privacy        = "public"

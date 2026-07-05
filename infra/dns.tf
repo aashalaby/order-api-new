@@ -18,7 +18,7 @@ resource "cloudflare_dns_record" "web" {
   zone_id = var.cloudflare_zone_id
   name    = var.web_hostname
   type    = "CNAME"
-  content = scaleway_container.web.domain_name
+  content = trimprefix(scaleway_container.web.public_endpoint, "https://")
   proxied = false
   ttl     = 300
   comment = "order-api web app on Scaleway Serverless Containers (Terraform-managed)"
@@ -28,7 +28,7 @@ resource "cloudflare_dns_record" "api" {
   zone_id = var.cloudflare_zone_id
   name    = var.api_hostname
   type    = "CNAME"
-  content = scaleway_container.api.domain_name
+  content = trimprefix(scaleway_container.api.public_endpoint, "https://")
   proxied = false
   ttl     = 300
   comment = "order-api Go API on Scaleway Serverless Containers (Terraform-managed)"
